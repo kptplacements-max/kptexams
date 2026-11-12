@@ -22,6 +22,7 @@ import examSessionRoutes from "./routes/examSessionRoutes.js";
 import auditLogRoutes from "./routes/auditLogRoutes.js";
 import backupRoutes from "./routes/backupRoutes.js";
 import oldResultRoutes from "./routes/oldResultRoutes.js";
+import phoneScanRoutes from "./routes/phoneScanRoutes.js";
 import stepUpRoutes from "./routes/stepUpRoutes.js";
 
 
@@ -127,6 +128,7 @@ app.use("/api/exam-sessions", examSessionRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/backups", backupRoutes);
 app.use("/api/old-results", oldResultRoutes);
+app.use("/api/phone-scans", phoneScanRoutes);
 app.use("/api/otp", stepUpRoutes);
 
 

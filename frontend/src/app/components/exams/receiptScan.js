@@ -34,7 +34,8 @@ export async function scanReceipt(file, onProgress) {
 // -> { txnNo: "CR0926020200197034", paidOn: "2026-09-09" } (empty when not read)
 export async function scanNumber(image, onProgress) {
   const worker = await getWorker(onProgress);
-  await worker.setParameters({ tessedit_char_whitelist: "CRKO0123456789/: ", tessedit_pageseg_mode: "7" });
+  // a block (the box may hold the row and its labels), not one line
+  await worker.setParameters({ tessedit_char_whitelist: "CRKO0123456789/: ", tessedit_pageseg_mode: "6" });
   try {
     const { data } = await worker.recognize(image);
     const text = data?.text || "";

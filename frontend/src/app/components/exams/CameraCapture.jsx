@@ -13,7 +13,7 @@ import { createPortal } from "react-dom";
 import Modal, { btn } from "../ui/Modal";
 
 // the guide box, as parts of the picture
-const BOX = { x: 0.08, y: 0.38, w: 0.84, h: 0.24 };
+const BOX = { x: 0.05, y: 0.36, w: 0.9, h: 0.28 };
 
 const toBlob = (canvas) => new Promise((ok) => canvas.toBlob((b) => ok(b), "image/png"));
 
@@ -83,12 +83,18 @@ export default function CameraCapture({ onPhoto, onClose, onFile }) {
       lg
       onClose={onClose}
       title="Photo of the challan"
-      subtitle="Hold the challan close, with the Challan Reference Number (CR…) inside the box, then press Take photo."
+      subtitle="Hold the challan so that the row with the Date and the Challan Reference Number (CR…) is inside the box, then press Take photo."
       footer={
         <>
-          <button onClick={onFile} className={btn.secondary}>
-            Choose a file instead
-          </button>
+          {onFile ? (
+            <button onClick={onFile} className={btn.secondary}>
+              Choose a file instead
+            </button>
+          ) : (
+            <button onClick={onClose} className={btn.secondary}>
+              Cancel
+            </button>
+          )}
           <button onClick={take} disabled={state !== "live"} className={btn.primary}>
             Take photo
           </button>
@@ -103,13 +109,13 @@ export default function CameraCapture({ onPhoto, onClose, onFile }) {
               className="pointer-events-none absolute rounded-lg border-[3px] border-amber-400 shadow-[0_0_0_9999px_rgba(15,23,42,0.45)]"
               style={{ left: `${BOX.x * 100}%`, top: `${BOX.y * 100}%`, width: `${BOX.w * 100}%`, height: `${BOX.h * 100}%` }}
             >
-              <span className="absolute -top-6 left-0 rounded bg-amber-400 px-1.5 py-0.5 text-[11px] font-bold text-slate-900">Challan Reference Number here</span>
+              <span className="absolute -top-6 left-0 rounded bg-amber-400 px-1.5 py-0.5 text-[11px] font-bold text-slate-900">Date + Challan Reference Number row here</span>
             </div>
           )}
           {state === "starting" && <p className="absolute inset-0 flex items-center justify-center text-sm text-slate-300">Starting the camera…</p>}
           {state === "failed" && (
             <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm leading-6 text-slate-200">
-              No camera found, or the browser was not allowed to use it. Allow the camera (icon in the address bar) or choose a photo / scan file instead.
+              No camera found, or the browser was not allowed to use it. Allow the camera (icon in the address bar), or use Scan with phone.
             </p>
           )}
         </div>

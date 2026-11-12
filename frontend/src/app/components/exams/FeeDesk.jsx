@@ -23,7 +23,7 @@ import Modal, { btn, field } from "../ui/Modal";
 import { useConfirm, useToast } from "../ui/Feedback";
 import { ADMISSION_SHORT, DEPARTMENTS, downloadBlob, errMsg, useApi } from "./shared";
 import { T } from "../ui/table";
-import { scanChallanFast, scanNumber, scanReceipt } from "./receiptScan";
+import { scanNumber, scanReceipt } from "./receiptScan";
 import CameraCapture from "./CameraCapture";
 import { useIsAdmin } from "../useRole";
 
@@ -440,9 +440,7 @@ export default function FeeDesk({ examId: fixedExamId, canEdit = false, backHref
           onSaved={(reg) => {
             replace(reg);
             setPaying(null);
-            load(); // refresh counts
-            setQ("");
-            setTimeout(() => searchRef.current?.focus(), 50);
+            load(); // refresh counts; the page stays where it was (next student below)
           }}
         />
       )}
@@ -1006,7 +1004,7 @@ function PayModal({ examId, reg: initialReg, onClose, onSaved, onChanged }) {
           )}
           </div>
           {/* right: the transactions */}
-          <Payments examId={examId} reg={reg} markKeys={openKeys} onChanged={changed} />
+          <Payments examId={examId} reg={reg} markKeys={openKeys} onChanged={changed} onDone={(r) => onSaved({ ...r, due: r.due || reg.due })} />
         </div>
       )}
     </Modal>
@@ -1015,7 +1013,7 @@ function PayModal({ examId, reg: initialReg, onClose, onSaved, onChanged }) {
 
 // Transactions of one student: add one or several at once (typed or read from
 // a scanned receipt) / remove. Each is saved with the same request as before.
-function Payments({ examId, reg, markKeys, onChanged }) {
+function Payments({ examId, reg, markKeys, onChanged, onDone }) {
   const api = useApi();
   const toast = useToast();
   const confirm = useConfirm();
@@ -1024,7 +1022,6 @@ function Payments({ examId, reg, markKeys, onChanged }) {
   const [alsoMark, setAlsoMark] = useState(true);
   const [scan, setScan] = useState(null); // { row, progress } while a receipt is read
   const [busy, setBusy] = useState(false);
-  const fileRef = useRef(null);
   const scanRow = useRef(0);
   const payments = reg.payments || [];
 
@@ -1033,58 +1030,88 @@ function Payments({ examId, reg, markKeys, onChanged }) {
   const newTotal = filled.reduce((a, r) => a + (Number(r.amount) || 0), 0);
 
   const [camera, setCamera] = useState(false); // webcam window open
-  // Scan: straight to the scanned file (a phone offers its camera there);
-  // the webcam window only when asked for ("No scanner? Use the webcam")
-  const startScan = (i) => {
+  const startWebcam = (i) => {
     scanRow.current = i;
-    fileRef.current?.click();
-  };
-  const startWebcam = () => {
-    const i = rows.findIndex((r) => !r.txnNo.trim());
-    scanRow.current = i >= 0 ? i : 0;
     setCamera(true);
   };
 
-  const onScan = (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (file) readPhoto(file);
+  // Fill a row with what was read (webcam or phone): row "at", or the first
+  // empty one (a new row when all are filled). The date is taken only from
+  // the challan: not read -> left empty for the office to type.
+  const fill = (r, at = null) => {
+    // amount not readable: the balance to pay, for the office to check
+    const balance = reg.due ? Math.max(0, reg.due.total - (reg.amountPaid || 0)) : 0;
+    const amount = r.amount ? String(r.amount) : balance ? String(balance) : "";
+    setRows((list) => {
+      const next = [...list];
+      let i = at ?? next.findIndex((x) => !x.txnNo.trim());
+      if (i < 0) {
+        next.push(blank());
+        i = next.length - 1;
+      }
+      next[i] = { ...next[i], txnNo: r.txnNo || next[i].txnNo, amount: amount || next[i].amount, paidOn: r.paidOn || "", source: "SCAN", scanned: true };
+      return next;
+    });
   };
 
-  // file: the whole picture; box: the close-up of the reference number (camera window)
-  const readPhoto = async (file, box = null) => {
+  // webcam: full = the whole picture, box = the close-up of the date + reference number row
+  const readPhoto = async (full, box = null) => {
     setCamera(false);
     const i = scanRow.current;
     setScan({ row: i, progress: 0 });
     try {
       const progress = (p) => setScan({ row: i, progress: p });
-      // quickest first: the camera box, or the fixed places on a challan page;
-      // the whole page only when the number is not found there
       let r = null;
       if (box) {
         const b = await scanNumber(box).catch(() => null);
         if (b?.txnNo) r = { txnNo: b.txnNo, amount: "", paidOn: b.paidOn };
-      } else {
-        r = await scanChallanFast(file, progress).catch(() => null);
       }
-      if (!r) r = await scanReceipt(file, progress);
-      const txnNo = r.txnNo;
-      // amount not readable: the balance to pay, for the office to check
-      const balance = reg.due ? Math.max(0, reg.due.total - (reg.amountPaid || 0)) : 0;
-      const amount = r.amount || (balance ? String(balance) : "");
-      setRows((list) =>
-        list.map((row, j) => (j === i ? { ...row, txnNo: txnNo || row.txnNo, amount: amount || row.amount, paidOn: r.paidOn || row.paidOn, source: "SCAN", scanned: true } : row))
-      );
-      if (!txnNo) toast.info("Could not read the reference number clearly. Hold the challan closer, or type it.");
+      if (!r) r = await scanReceipt(full, progress);
+      fill(r, i);
+      if (!r.txnNo) toast.info("Could not read the reference number clearly. Hold the challan closer, or type it.");
     } catch {
       toast.error("Could not read the image. Please type the details.");
     }
     setScan(null);
   };
 
+  // Phone: a challan read on this person's phone ("Scan with phone") is filled in here
+  const [phoneOn, setPhoneOn] = useState(true);
+  useEffect(() => {
+    let stop = false;
+    let timer = null;
+    let fails = 0;
+    const tick = async () => {
+      try {
+        const r = await api("post", "/phone-scans/next");
+        fails = 0;
+        const s = r.data?.data;
+        if (s && !stop) {
+          fill(s);
+          toast.success("Filled in from your phone – please check.");
+        }
+      } catch {
+        fails++;
+      }
+      if (stop) return;
+      if (fails >= 5) return setPhoneOn(false); // server not reachable: stop asking
+      timer = setTimeout(tick, 2500);
+    };
+    timer = setTimeout(tick, 800);
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api]);
+
   // saves every filled row, one after the other; the ticked fees are marked
   // paid together with the first one (when "also mark" is on)
   const save = async () => {
+    if (filled.some((r) => !r.paidOn)) {
+      toast.error("Enter the payment date (as on the challan) before saving.");
+      return;
+    }
     setBusy(true);
     let last = null;
     let saved = 0;
@@ -1100,14 +1127,18 @@ function Payments({ examId, reg, markKeys, onChanged }) {
         failed.push({ ...row, error: errMsg(e, "Could not add the payment.") });
       }
     }
-    if (last) onChanged(last);
     if (failed.length) {
+      if (last) onChanged(last);
       setRows(failed.map(({ error, ...r }) => r));
       toast.error(`${saved} saved, ${failed.length} not: ${failed.map((f) => `${f.txnNo || f.amount}: ${f.error}`).join("; ")}`, 10000);
-    } else {
-      setRows([blank()]);
-      toast.success(saved === 1 ? "Transaction added." : `${saved} transactions added.`);
+      setBusy(false);
+      return;
     }
+    toast.success(saved === 1 ? "Transaction added." : `${saved} transactions added.`);
+    // all saved: the window closes, the list stays where it was (next student)
+    if (onDone) return onDone(last);
+    onChanged(last);
+    setRows([blank()]);
     setBusy(false);
   };
 
@@ -1193,15 +1224,15 @@ function Payments({ examId, reg, markKeys, onChanged }) {
               </label>
               <label className="block min-w-0">
                 {i === 0 && <span className="text-[11px] font-semibold text-slate-600">Paid on</span>}
-                <input type="date" value={r.paidOn} max={today()} onChange={(e) => setRow(i, { paidOn: e.target.value })} className={`${cell} ${i === 0 ? "mt-1" : ""}`} />
+                <input type="date" value={r.paidOn} max={today()} onChange={(e) => setRow(i, { paidOn: e.target.value })} className={`${cell} ${!r.paidOn ? "border-amber-500 bg-amber-50" : ""} ${i === 0 ? "mt-1" : ""}`} />
               </label>
               <div className="flex h-10 items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => startScan(i)}
+                  onClick={() => startWebcam(i)}
                   disabled={Boolean(scan)}
                   className="flex h-10 items-center rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  title="Choose the scanned challan / receipt – the reference number, amount and date are filled in"
+                  title="Hold the challan in front of the webcam – the reference number and date are filled in"
                 >
                   {scan?.row === i ? (
                     `${scan.progress}%`
@@ -1211,7 +1242,7 @@ function Payments({ examId, reg, markKeys, onChanged }) {
                         <path d="M4 8h3l1.5-2h7L17 8h3v11H4z" strokeLinejoin="round" />
                         <circle cx="12" cy="13" r="3.5" />
                       </svg>
-                      <span className="ml-1">Scan</span>
+                      <span className="ml-1">Webcam</span>
                     </>
                   )}
                 </button>
@@ -1221,30 +1252,25 @@ function Payments({ examId, reg, markKeys, onChanged }) {
                   </button>
                 )}
               </div>
-              {r.scanned && <p className="col-span-4 -mt-1 text-[11px] font-medium text-emerald-700">Filled from the receipt – please check.</p>}
+              {r.scanned && (
+                <p className={`col-span-4 -mt-1 text-[11px] font-medium ${r.paidOn ? "text-emerald-700" : "text-amber-700"}`}>
+                  {r.paidOn ? "Filled from the challan – please check." : "Filled from the challan – the date could not be read, please enter it."}
+                </p>
+              )}
             </div>
           ))}
         </div>
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onScan} />
-        {camera && (
-          <CameraCapture
-            onPhoto={readPhoto}
-            onClose={() => setCamera(false)}
-            onFile={() => {
-              setCamera(false);
-              fileRef.current?.click();
-            }}
-          />
-        )}
+        {camera && <CameraCapture onPhoto={readPhoto} onClose={() => setCamera(false)} />}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => setRows((list) => [...list, blank()])} className={btn.small}>
             + Add another transaction
           </button>
-          {typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && (
-            <button type="button" onClick={startWebcam} disabled={Boolean(scan)} className="text-xs font-semibold text-blue-700 hover:underline disabled:opacity-50">
-              No scanner? Use the webcam
-            </button>
+          {phoneOn && (
+            <span className="text-[11px] text-slate-500" title="On your mobile: sign in with the same account, open Menu → Scan with phone, take the photo and press Send">
+              <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500 align-middle" />
+              Phone: waiting for a challan photo
+            </span>
           )}
           {filled.length > 0 && (
             <span className="text-xs tabular-nums text-slate-600">

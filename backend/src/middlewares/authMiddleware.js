@@ -7,7 +7,9 @@ import { normalizeRole } from "../config/roles.js";
 // The signed-in person's details are kept for a short while, so that a page
 // sending many requests (e.g. the student import, step after step) does not
 // ask Clerk every time – Clerk allows only a limited number of calls.
-const CACHE_MS = 30 * 1000;
+// (5 minutes: the office saves a fee every minute or so – each save no longer
+// waits for Clerk; a changed role / removed account takes effect within 5 minutes)
+const CACHE_MS = 5 * 60 * 1000;
 const cache = new Map(); // userId -> { user, at }
 
 async function clerkUser(userId) {
