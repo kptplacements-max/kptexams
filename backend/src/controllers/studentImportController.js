@@ -297,6 +297,14 @@ function checkExistingRow(row, raw, map) {
   else if (semRaw < 1 || semRaw > 6) row.problems.push({ level: "error", field: "semester", message: "Semester must be 1 to 6." });
   else s.semester = semRaw;
 
+  // 2nd / 3rd year: a detained student (not promoted, writes only back papers)
+  // keeps "Detained" (the 1st-year rule allows only active / inactive)
+  const statusRaw = String(raw[Object.keys(map).find((h) => map[h] === "status")] ?? "").trim().toLowerCase();
+  if (statusRaw === "detained") {
+    s.status = "detained";
+    row.problems = row.problems.filter((p) => p.field !== "status");
+  }
+
   const m = s.registerNumber.match(REGNO_RE);
   if (!s.registerNumber) row.problems.push({ level: "error", field: "registerNumber", message: "Register number is missing." });
   else if (!m) row.problems.push({ level: "error", field: "registerNumber", message: `Register number ${s.registerNumber} does not look like ${COLLEGE_CODE}CS25001 (or ${EVENING_CODE}EE25001 for the evening college, ${COLLEGE_CODE}EC25X01 after a branch change, 189EC25044 for a student transferred from another college).` });

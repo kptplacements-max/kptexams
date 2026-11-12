@@ -739,6 +739,10 @@ function CourseList({ courses = [], only = null }) {
   );
 }
 
+// The list shows each photo as a small circle: ask Cloudinary for a small copy
+// (a few KB) instead of the full photo – the page scrolls much faster
+const thumb = (url = "") => (/res\.cloudinary\.com\/.+\/image\/upload\//.test(url) ? url.replace("/image/upload/", "/image/upload/c_fill,g_face,w_64,h_64,q_auto,f_auto/") : url);
+
 function FeeRow({ sl, reg, canEdit, delMode = false, picked, onPick, onQuickPaid, onPay }) {
   const st = FEE[reg.feeStatus] || FEE.UNPAID;
   const unpaid = reg.items.filter((i) => !i.paid).length;
@@ -758,7 +762,7 @@ function FeeRow({ sl, reg, canEdit, delMode = false, picked, onPick, onQuickPaid
         <div className="flex items-center gap-2.5">
           {reg.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={reg.imageUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-slate-200" />
+            <img src={thumb(reg.imageUrl)} alt="" loading="lazy" decoding="async" width={32} height={32} className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-slate-200" />
           ) : (
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-600">
               {initials(reg.name)}
@@ -874,7 +878,7 @@ function PayModal({ examId, reg: initialReg, onClose, onSaved, onChanged }) {
   return (
     <Modal
       open
-      lg
+      xl
       onClose={onClose}
       busy={busy}
       title={reg.name}
@@ -925,7 +929,7 @@ function PayModal({ examId, reg: initialReg, onClose, onSaved, onChanged }) {
           </label>
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[1fr_1.35fr]">
+        <div className="grid gap-6 lg:grid-cols-[1fr_1.6fr]">
           {/* left: the fees */}
           <div>
           {reg.due && (
@@ -1029,12 +1033,16 @@ function Payments({ examId, reg, markKeys, onChanged }) {
   const newTotal = filled.reduce((a, r) => a + (Number(r.amount) || 0), 0);
 
   const [camera, setCamera] = useState(false); // webcam window open
+  // Scan: straight to the scanned file (a phone offers its camera there);
+  // the webcam window only when asked for ("No scanner? Use the webcam")
   const startScan = (i) => {
     scanRow.current = i;
-    // a phone opens its own camera from the file box; a computer uses the webcam window
-    const phone = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
-    if (!phone && navigator.mediaDevices?.getUserMedia) setCamera(true);
-    else fileRef.current?.click();
+    fileRef.current?.click();
+  };
+  const startWebcam = () => {
+    const i = rows.findIndex((r) => !r.txnNo.trim());
+    scanRow.current = i >= 0 ? i : 0;
+    setCamera(true);
   };
 
   const onScan = (e) => {
@@ -1174,10 +1182,10 @@ function Payments({ examId, reg, markKeys, onChanged }) {
         <p className="text-xs font-semibold text-slate-700">Add transaction(s)</p>
         <div className="mt-2 space-y-2">
           {rows.map((r, i) => (
-            <div key={i} className="grid grid-cols-[1.4fr_0.9fr_1fr_auto] items-end gap-2">
+            <div key={i} className="grid grid-cols-[1.4fr_0.9fr_1fr_auto] items-end gap-2 lg:grid-cols-[minmax(15rem,1fr)_6.5rem_9.5rem_auto]">
               <label className="block min-w-0">
                 {i === 0 && <span className="text-[11px] font-semibold text-slate-600">Challan ref. / UTR / receipt no.</span>}
-                <input value={r.txnNo} onChange={(e) => setRow(i, { txnNo: e.target.value })} className={`${cell} ${i === 0 ? "mt-1" : ""}`} />
+                <input value={r.txnNo} onChange={(e) => setRow(i, { txnNo: e.target.value })} spellCheck={false} className={`${cell} font-mono tracking-tight ${i === 0 ? "mt-1" : ""}`} />
               </label>
               <label className="block min-w-0">
                 {i === 0 && <span className="text-[11px] font-semibold text-slate-600">Amount (₹)</span>}
@@ -1193,7 +1201,7 @@ function Payments({ examId, reg, markKeys, onChanged }) {
                   onClick={() => startScan(i)}
                   disabled={Boolean(scan)}
                   className="flex h-10 items-center rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  title="Take a photo of the challan / receipt – the reference number, amount and date are filled in"
+                  title="Choose the scanned challan / receipt – the reference number, amount and date are filled in"
                 >
                   {scan?.row === i ? (
                     `${scan.progress}%`
@@ -1233,6 +1241,11 @@ function Payments({ examId, reg, markKeys, onChanged }) {
           <button type="button" onClick={() => setRows((list) => [...list, blank()])} className={btn.small}>
             + Add another transaction
           </button>
+          {typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia && (
+            <button type="button" onClick={startWebcam} disabled={Boolean(scan)} className="text-xs font-semibold text-blue-700 hover:underline disabled:opacity-50">
+              No scanner? Use the webcam
+            </button>
+          )}
           {filled.length > 0 && (
             <span className="text-xs tabular-nums text-slate-600">
               New: <b>{rupees(newTotal)}</b> · total after saving <b>{rupees((reg.amountPaid || 0) + newTotal)}</b>

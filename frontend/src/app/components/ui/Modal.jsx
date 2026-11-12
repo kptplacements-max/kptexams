@@ -10,18 +10,31 @@ import { useEffect } from "react";
 
 import Icon from "../shell/Icon";
 
+// The page behind stops scrolling while any window is open. Counted, so that
+// two windows open together (e.g. a camera window over a fee window) never
+// leave the page locked after both are closed.
+let openWindows = 0;
+const lockPage = () => {
+  if (openWindows++ === 0) document.body.style.overflow = "hidden";
+};
+const unlockPage = () => {
+  openWindows = Math.max(0, openWindows - 1);
+  if (openWindows === 0) document.body.style.overflow = "";
+};
+
 export default function Modal({ open, onClose, title, subtitle, children, footer, wide = false, lg = false, xl = false, busy = false }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => e.key === "Escape" && !busy && onClose?.();
     window.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose, busy]);
+
+  useEffect(() => {
+    if (!open) return;
+    lockPage();
+    return unlockPage;
+  }, [open]);
 
   if (!open) return null;
   return (
